@@ -1,0 +1,20 @@
+server.name: kibana
+server.host: "0.0.0.0"
+
+elasticsearch.hosts: ["${ELASTICSEARCH_PROTOCOL}://${ELASTICSEARCH_HOST}:${ES_PORT}"]
+elasticsearch.username: ${ELASTICSEARCH_USERNAME}
+elasticsearch.password: ${KIBANA_SYSTEM_PASSWORD}
+
+# Logging
+logging.appenders.default:
+  type: console
+  layout:
+    type: json
+
+# Security
+# xpack.security.enabled: true
+xpack.encryptedSavedObjects.encryptionKey: "fhjskloppd083lfdfklsdfjoiqeurwfzxcvbnm12"
+
+# Session
+xpack.security.session.idleTimeout: "8h"
+xpack.security.session.lifespan: "30d"

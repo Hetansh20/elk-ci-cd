@@ -1,0 +1,217 @@
+trigger: none
+ 
+pr: none
+ 
+variables:
+- group: VG-ELK-UAT
+ 
+- name: poolName
+  value: 'IE-ProductionPool'
+ 
+- name: agentName
+  value: 'vmbldsrviedevwe001'
+ 
+pool:
+  name: $(poolName)
+  demands:
+    - Agent.Name -equals $(agentName)
+ 
+stages:
+ 
+#==============================================================================
+# Initialize
+#==============================================================================
+ 
+- stage: Initialize
+  displayName: "Initialize"
+ 
+  jobs:
+ 
+  - job: Init
+    displayName: "Initialize Deployment"
+ 
+    workspace:
+      clean: all
+ 
+    steps:
+ 
+    - checkout: self
+      clean: true
+ 
+    - task: CmdLine@2
+      displayName: "Print Configuration"
+      inputs:
+        script: |
+          echo "=========================================="
+          echo "ELK Deployment Started"
+          echo "=========================================="
+          echo "Build Number : $(Build.BuildNumber)"
+          echo "Agent        : $(Agent.Name)"
+          echo "Repository   : $(Build.Repository.Name)"
+          echo "Source Dir   : $(Build.SourcesDirectory)"
+          echo "=========================================="
+ 
+#==============================================================================
+# Deploy
+#==============================================================================
+ 
+- stage: Deploy
+ 
+  displayName: "Deploy ELK"
+ 
+  dependsOn: Initialize
+ 
+  condition: succeeded()
+ 
+  jobs:
+ 
+  - job: DeployELK
+ 
+    displayName: "Deploy ELK Stack"
+ 
+    workspace:
+      clean: all
+ 
+    steps:
+ 
+    - checkout: self
+      clean: true
+ 
+    - task: CmdLine@2
+      displayName: "Install dos2unix"
+      inputs:
+        script: |
+ 
+          if ! command -v dos2unix >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y dos2unix
+          fi
+ 
+          dos2unix --version
+ 
+    - task: CmdLine@2
+      displayName: "Normalize deploy.sh"
+      inputs:
+        script: |
+ 
+          dos2unix deploy.sh || true
+          chmod +x deploy.sh
+ 
+    - task: CmdLine@2
+      displayName: "Validate Docker Compose"
+      inputs:
+        script: |
+ 
+          export ELK_VERSION="$(ELK_VERSION)"
+          export ELASTIC_CLUSTER_NAME="$(ELASTIC_CLUSTER_NAME)"
+          export ELASTIC_PASSWORD="$(ELASTIC_PASSWORD)"
+          export KIBANA_SYSTEM_PASSWORD="$(KIBANA_SYSTEM_PASSWORD)"
+          export ELASTICSEARCH_USERNAME="$(ELASTICSEARCH_USERNAME)"
+ 
+          export ES_JVM_HEAP="$(ES_JVM_HEAP)"
+          export LS_JVM_HEAP="$(LS_JVM_HEAP)"
+ 
+          export ES_PORT="$(ES_PORT)"
+          export KIBANA_PORT="$(KIBANA_PORT)"
+          export LS_BEATS_PORT="$(LS_BEATS_PORT)"
+          export LS_TCP_PORT="$(LS_TCP_PORT)"
+          export LS_HTTP_PORT="$(LS_HTTP_PORT)"
+          export LS_METRICS_PORT="$(LS_METRICS_PORT)"
+ 
+          export ELASTICSEARCH_PROTOCOL="$(ELASTICSEARCH_PROTOCOL)"
+          export ELASTICSEARCH_HOST="$(ELASTICSEARCH_HOST)"
+          export ELASTICSEARCH_HEALTH_HOST="$(ELASTICSEARCH_HEALTH_HOST)"
+ 
+          export LOGSTASH_PROTOCOL="$(LOGSTASH_PROTOCOL)"
+          export LOGSTASH_HOST="$(LOGSTASH_HOST)"
+          export LOGSTASH_HEALTH_HOST="$(LOGSTASH_HEALTH_HOST)"
+ 
+          export KIBANA_PROTOCOL="$(KIBANA_PROTOCOL)"
+          export KIBANA_HEALTH_HOST="$(KIBANA_HEALTH_HOST)"
+ 
+          export XPACK_SECURITY_ENABLED="$(XPACK_SECURITY_ENABLED)"
+          export XPACK_SECURITY_HTTP_SSL_ENABLED="$(XPACK_SECURITY_HTTP_SSL_ENABLED)"
+ 
+          docker compose config
+ 
+    - task: CmdLine@2
+      displayName: "Deploy ELK Stack"
+      inputs:
+        script: |
+ 
+          export ELK_VERSION="$(ELK_VERSION)"
+          export ELASTIC_CLUSTER_NAME="$(ELASTIC_CLUSTER_NAME)"
+          export ELASTIC_PASSWORD="$(ELASTIC_PASSWORD)"
+          export KIBANA_SYSTEM_PASSWORD="$(KIBANA_SYSTEM_PASSWORD)"
+          export ELASTICSEARCH_USERNAME="$(ELASTICSEARCH_USERNAME)"
+ 
+          export ES_JVM_HEAP="$(ES_JVM_HEAP)"
+          export LS_JVM_HEAP="$(LS_JVM_HEAP)"
+ 
+          export ES_PORT="$(ES_PORT)"
+          export KIBANA_PORT="$(KIBANA_PORT)"
+          export LS_BEATS_PORT="$(LS_BEATS_PORT)"
+          export LS_TCP_PORT="$(LS_TCP_PORT)"
+          export LS_HTTP_PORT="$(LS_HTTP_PORT)"
+          export LS_METRICS_PORT="$(LS_METRICS_PORT)"
+ 
+          export ELASTICSEARCH_PROTOCOL="$(ELASTICSEARCH_PROTOCOL)"
+          export ELASTICSEARCH_HOST="$(ELASTICSEARCH_HOST)"
+          export ELASTICSEARCH_HEALTH_HOST="$(ELASTICSEARCH_HEALTH_HOST)"
+ 
+          export LOGSTASH_PROTOCOL="$(LOGSTASH_PROTOCOL)"
+          export LOGSTASH_HOST="$(LOGSTASH_HOST)"
+          export LOGSTASH_HEALTH_HOST="$(LOGSTASH_HEALTH_HOST)"
+ 
+          export KIBANA_PROTOCOL="$(KIBANA_PROTOCOL)"
+          export KIBANA_HEALTH_HOST="$(KIBANA_HEALTH_HOST)"
+ 
+          export XPACK_SECURITY_ENABLED="$(XPACK_SECURITY_ENABLED)"
+          export XPACK_SECURITY_HTTP_SSL_ENABLED="$(XPACK_SECURITY_HTTP_SSL_ENABLED)"
+ 
+          ./deploy.sh
+ 
+    - task: CmdLine@2
+      displayName: "Verify Deployment"
+      inputs:
+        script: |
+ 
+          echo "=========================================="
+          echo "Docker Compose Status"
+          echo "=========================================="
+ 
+          docker compose ps
+ 
+          echo ""
+          echo "=========================================="
+          echo "Running Containers"
+          echo "=========================================="
+ 
+          docker ps
+ 
+#==============================================================================
+# Workspace Cleanup
+#==============================================================================
+ 
+#- stage: FinalWorkspaceCleanup
+# 
+#  displayName: "Workspace Cleanup"
+# 
+#  dependsOn:
+#    - Deploy
+# 
+#  condition: always()
+# 
+#  jobs:
+# 
+#  - job: Cleanup
+# 
+#    displayName: "Delete Workspace"
+# 
+#    steps:
+# 
+#    - task: DeleteFiles@1
+#      inputs:
+#        SourceFolder: '$(Pipeline.Workspace)'
+#        Contents: '**/*'
+#        RemoveDotFiles: true

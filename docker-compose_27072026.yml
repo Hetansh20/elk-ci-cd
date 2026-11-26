@@ -1,0 +1,350 @@
+#version: "3.9"
+#
+#x-elk-common: &elk-common
+#  networks:
+#    - elk
+#  restart: unless-stopped
+#
+#services:
+#
+#  elasticsearch:
+#    <<: *elk-common
+#    image: docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+#    container_name: elk_elasticsearch
+#    environment:
+#      - node.name=elasticsearch
+#      - discovery.type=single-node
+#      - ELASTIC_PASSWORD=changeme
+#      - xpack.security.enabled=true
+#      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+#    volumes:
+#      - elasticsearch_data:/usr/share/elasticsearch/data
+#    ports:
+#      - "9200:9200"
+#
+#  logstash:
+#    <<: *elk-common
+#    image: docker.elastic.co/logstash/logstash:8.13.0
+#    container_name: elk_logstash
+#    environment:
+#      - ELASTIC_PASSWORD=changeme
+#    volumes:
+#      - ./logstash/pipeline:/usr/share/logstash/pipeline
+#    ports:
+#      - "5044:5044"   # ONLY beats
+#      - "9600:9600"
+#
+#    depends_on:
+#      - elasticsearch
+#
+#  kibana:
+#    <<: *elk-common
+#    image: docker.elastic.co/kibana/kibana:8.13.0
+#    container_name: elk_kibana
+#    environment:
+#      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+#      - ELASTICSEARCH_USERNAME=kibana_system
+#      - ELASTICSEARCH_PASSWORD=changeme
+#    ports:
+#      - "5601:5601"
+#    depends_on:
+#      - elasticsearch
+#
+#  filebeat:
+#    <<: *elk-common
+#    image: docker.elastic.co/beats/filebeat:8.13.0
+#    container_name: elk_filebeat
+#    user: root
+#    volumes:
+#      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+#      - ./logs:/logs:ro
+#      - filebeat_data:/usr/share/filebeat/data
+#    command: filebeat -e --strict.perms=false
+#    depends_on:
+#      - logstash
+#
+#  # ── Example services (NO logstash config now) ─────────────────────────
+#
+#  product-a-api-dev:
+#    <<: *elk-common
+#    build:
+#      context: ./client
+#    container_name: product_a_api_dev
+#    environment:
+#      - PRODUCT=product-a
+#      - SERVICE=api-service
+#      - ENVIRONMENT=dev
+#    volumes:
+#      - ./logs/dev/product-a/api-service:/app/logs
+#    command: python examples/product_a_api.py
+#
+#  product-b-payment-prod:
+#    <<: *elk-common
+#    build:
+#      context: ./client
+#    container_name: product_b_payment_prod
+#    environment:
+#      - PRODUCT=product-b
+#      - SERVICE=payment-service
+#      - ENVIRONMENT=prod
+#    volumes:
+#      - ./logs/prod/product-b/payment-service:/app/logs
+#    command: python examples/product_b_payment.py
+#
+#networks:
+#  elk:
+#    name: elk_network
+#
+#volumes:
+#  elasticsearch_data:
+#  filebeat_data:
+
+
+version: "3.9"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ELK Stack with Filebeat  ·  Multi-product / Multi-service / Multi-env
+# ─────────────────────────────────────────────────────────────────────────────
+#
+#  Log path convention (used by Filebeat autodiscovery):
+#    ./logs/<environment>/<product>/<service>/app.log
+#
+#  Example:
+#    ./logs/dev/product-a/auth-service/app.log
+#    ./logs/prod/product-b/payment-service/app.log
+# ─────────────────────────────────────────────────────────────────────────────
+
+x-elk-common: &elk-common
+  networks:
+    - elk
+  restart: unless-stopped
+
+services:
+
+  # ── Elasticsearch ────────────────────────────────────────────────────────
+  elasticsearch:
+    <<: *elk-common
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_VERSION:-8.13.0}
+    container_name: elk_elasticsearch
+    environment:
+      - node.name=elasticsearch
+      - cluster.name=${ELASTIC_CLUSTER_NAME:-elk-cluster}
+      - discovery.type=single-node
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - xpack.security.enabled=true
+      - xpack.security.http.ssl.enabled=false   # TLS terminated at proxy in prod
+      - xpack.license.self_generated.type=basic
+      - ES_JAVA_OPTS=-Xms${ES_JVM_HEAP:-512m} -Xmx${ES_JVM_HEAP:-512m}
+      - bootstrap.memory_lock=true
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
+    volumes:
+      - elasticsearch_data:/usr/share/elasticsearch/data
+      - ./elasticsearch/config/elasticsearch.yml:/usr/share/elasticsearch/config/elasticsearch.yml:ro
+    ports:
+      - "${ES_PORT:-9200}:9200"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s -u elastic:${ELASTIC_PASSWORD:-changeme} http://localhost:9200/_cluster/health | grep -vq '\"status\":\"red\"'"]
+      interval: 20s
+      timeout: 10s
+      retries: 10
+
+  # ── Logstash ─────────────────────────────────────────────────────────────
+  logstash:
+    <<: *elk-common
+    image: docker.elastic.co/logstash/logstash:${ELK_VERSION:-8.13.0}
+    container_name: elk_logstash
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - LS_JAVA_OPTS=-Xms${LS_JVM_HEAP:-256m} -Xmx${LS_JVM_HEAP:-256m}
+    volumes:
+      - ./logstash/config/logstash.yml:/usr/share/logstash/config/logstash.yml:ro
+      - ./logstash/pipeline:/usr/share/logstash/pipeline:ro
+    ports:
+      - "${LS_BEATS_PORT:-5044}:5044"   # Beats input
+      - "${LS_TCP_PORT:-5000}:5000"     # TCP input (direct log shipping)
+      - "${LS_HTTP_PORT:-8080}:8080"    # HTTP input
+      - "${LS_METRICS_PORT:-9600}:9600" # Logstash metrics API
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:9600/_node/stats | grep -q uptime"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── Kibana ───────────────────────────────────────────────────────────────
+  kibana:
+    <<: *elk-common
+    image: docker.elastic.co/kibana/kibana:${ELK_VERSION:-8.13.0}
+    container_name: elk_kibana
+    environment:
+      - KIBANA_SYSTEM_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-changeme}
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - ELASTICSEARCH_USERNAME=kibana_system
+      - ELASTICSEARCH_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-changeme}
+    volumes:
+      - ./kibana/config/kibana.yml:/usr/share/kibana/config/kibana.yml:ro
+      - kibana_data:/usr/share/kibana/data
+    ports:
+      - "${KIBANA_PORT:-5601}:5601"
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s http://localhost:5601/api/status | grep -q '\"level\":\"available\"'"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # ── Filebeat ─────────────────────────────────────────────────────────────
+  # Filebeat harvests log files from the shared ./logs volume and ships
+  # them to Logstash.  It extracts product / service / environment from
+  # the file path using a regex processor.
+  filebeat:
+    <<: *elk-common
+    image: docker.elastic.co/beats/filebeat:${ELK_VERSION:-8.13.0}
+    container_name: elk_filebeat
+    user: root  # required to read other containers' log files
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - LOGSTASH_HOST=logstash:5044
+    volumes:
+      - ./filebeat/filebeat.yml:/usr/share/filebeat/filebeat.yml:ro
+      - ./logs:/logs:ro                  # all service logs land here
+      - filebeat_data:/usr/share/filebeat/data
+      # Optional: also ship Docker container stdout logs
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    command: filebeat -e -strict.perms=false
+    depends_on:
+      logstash:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "filebeat test config -e"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # ── ELK Setup (one-shot init container) ─────────────────────────────────
+  # Creates Kibana system user password + index templates on first start
+  elk-setup:
+    image: docker.elastic.co/elasticsearch/elasticsearch:${ELK_VERSION:-8.13.0}
+    container_name: elk_setup
+    networks:
+      - elk
+    environment:
+      - ELASTIC_PASSWORD=${ELASTIC_PASSWORD:-changeme}
+      - KIBANA_SYSTEM_PASSWORD=${KIBANA_SYSTEM_PASSWORD:-changeme}
+    volumes:
+      - ./scripts/setup.sh:/setup.sh:ro
+    command: bash /setup.sh
+    depends_on:
+      elasticsearch:
+        condition: service_healthy
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Example application services (replace / extend with real services)
+  # Each service writes JSON logs into the shared ./logs volume.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  # product-a · auth-service · dev
+  # product-a-auth-dev:
+  #   <<: *elk-common
+  #   build:
+  #     context: ./client
+  #     dockerfile: Dockerfile
+  #   container_name: product_a_auth_dev
+  #   environment:
+  #     - PRODUCT=product-a
+  #     - SERVICE=auth-service
+  #     - ENVIRONMENT=dev
+  #     - LOG_LEVEL=DEBUG
+  #     - LOGSTASH_HOST=logstash
+  #     - LOGSTASH_PORT=5000
+  #   volumes:
+  #     - ./logs/dev/product-a/auth-service:/app/logs
+  #   command: python examples/product_a_auth.py
+  #   depends_on:
+  #     - logstash
+
+  # # product-a · api-service · dev
+  # product-a-api-dev:
+  #   <<: *elk-common
+  #   build:
+  #     context: ./client
+  #     dockerfile: Dockerfile
+  #   container_name: product_a_api_dev
+  #   environment:
+  #     - PRODUCT=product-a
+  #     - SERVICE=api-service
+  #     - ENVIRONMENT=dev
+  #     - LOG_LEVEL=DEBUG
+  #     - LOGSTASH_HOST=logstash
+  #     - LOGSTASH_PORT=5000
+  #   volumes:
+  #     - ./logs/dev/product-a/api-service:/app/logs
+  #   command: python examples/product_a_api.py
+  #   depends_on:
+  #     - logstash
+
+  # # product-b · payment-service · prod
+  # product-b-payment-prod:
+  #   <<: *elk-common
+  #   build:
+  #     context: ./client
+  #     dockerfile: Dockerfile
+  #   container_name: product_b_payment_prod
+  #   environment:
+  #     - PRODUCT=product-b
+  #     - SERVICE=payment-service
+  #     - ENVIRONMENT=prod
+  #     - LOG_LEVEL=INFO
+  #     - LOGSTASH_HOST=logstash
+  #     - LOGSTASH_PORT=5000
+  #   volumes:
+  #     - ./logs/prod/product-b/payment-service:/app/logs
+  #   command: python examples/product_b_payment.py
+  #   depends_on:
+  #     - logstash
+
+  # # product-b · notification-service · prod
+  # product-b-notification-prod:
+  #   <<: *elk-common
+  #   build:
+  #     context: ./client
+  #     dockerfile: Dockerfile
+  #   container_name: product_b_notification_prod
+  #   environment:
+  #     - PRODUCT=product-b
+  #     - SERVICE=notification-service
+  #     - ENVIRONMENT=prod
+  #     - LOG_LEVEL=INFO
+  #     - LOGSTASH_HOST=logstash
+  #     - LOGSTASH_PORT=5000
+  #   volumes:
+  #     - ./logs/prod/product-b/notification-service:/app/logs
+  #   command: python examples/product_b_notification.py
+  #   depends_on:
+  #     - logstash
+
+networks:
+  elk:
+    driver: bridge
+    name: elk_network
+
+volumes:
+  elasticsearch_data:
+    driver: local
+  kibana_data:
+    driver: local
+  filebeat_data:
+    driver: local
+

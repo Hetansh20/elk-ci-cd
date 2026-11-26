@@ -1,0 +1,11 @@
+cluster.name: "elk-cluster"
+network.host: 0.0.0.0
+
+# Security
+xpack.security.enabled: true
+xpack.security.http.ssl.enabled: false
+
+# # Slow log thresholds
+# index.search.slowlog.threshold.query.warn: 10s
+# index.search.slowlog.threshold.fetch.warn: 1s
+# index.indexing.slowlog.threshold.index.warn: 10s

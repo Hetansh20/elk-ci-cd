@@ -1,0 +1,21 @@
+http.host: "0.0.0.0"
+#xpack.monitoring.enabled: false
+xpack.monitoring.enabled: true
+xpack.monitoring.elasticsearch.hosts: ["${ELASTICSEARCH_PROTOCOL}://${ELASTICSEARCH_HOST}:${ES_PORT}"]
+xpack.monitoring.elasticsearch.username: "elastic"
+xpack.monitoring.elasticsearch.password: "${ELASTIC_PASSWORD}"
+
+
+xpack.management.enabled: false
+
+# Pipeline settings
+pipeline.workers: 2
+pipeline.batch.size: 250
+pipeline.batch.delay: 50
+
+
+
+# Queue settings (persistent queue for durability)
+queue.type: persisted
+queue.max_bytes: 1gb
+queue.checkpoint.writes: 1024

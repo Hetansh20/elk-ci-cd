@@ -1,0 +1,45 @@
+filebeat.inputs:
+
+- type: filestream
+  id: app-logs
+  enabled: true
+
+  paths:
+    - /logs/*/*/*/*.log   # ✅ FIXED
+
+  parsers:
+    - ndjson:
+        target: ""
+        overwrite_keys: true
+        add_error_key: true
+
+  processors:
+    # Extract env/product/service from path
+    - dissect:
+        tokenizer: "/logs/%{environment}/%{product}/%{service}/%{}"
+        field: "log.file.path"
+        target_prefix: ""
+
+    # Normalize level
+    - script:
+        lang: javascript
+        source: >
+          function process(event) {
+            var level = event.Get("level");
+            if (level) event.Put("level", level.toUpperCase());
+          }
+
+    - add_tags:
+        tags: ["filebeat"]
+
+processors:
+  - add_host_metadata: {}
+
+output.logstash:
+  hosts: ["logstash:5044"]
+
+  loadbalance: true
+  worker: 2
+  bulk_max_size: 2048
+
+logging.level: info

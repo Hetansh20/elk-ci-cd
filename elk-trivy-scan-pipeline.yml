@@ -1,0 +1,137 @@
+trigger: none
+
+variables:
+- name: poolName
+  value: 'IE-ProductionPool'
+
+- name: agentName
+  value: 'vmbldsrviedevwe001'
+
+pool:
+  name: $(poolName)
+  demands:
+    - Agent.Name -equals $(agentName)
+
+stages:
+- stage: Trivy_Image_Scan
+  displayName: "Trivy Image Scan"
+
+  jobs:
+  - job: Scan_ELK_Images
+    displayName: "Scan ELK Docker Images"
+
+    steps:
+
+    - script: |
+        set -e
+
+        echo "Installing Trivy..."
+
+        sudo mkdir -p /opt/tools
+
+        curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+          | sudo sh -s -- -b /opt/tools
+
+        /opt/tools/trivy --version
+      displayName: "Install Trivy"
+
+    - script: |
+        set -e
+
+        echo "Preparing Trivy cache..."
+
+        sudo mkdir -p /data/devops/trivy-cache
+        sudo chmod 777 /data/devops/trivy-cache
+
+        ls -ld /data/devops/trivy-cache
+      displayName: "Prepare Trivy Cache"
+
+    - script: |
+        set -e
+
+        mkdir -p reports
+        mkdir -p templates
+
+        wget -q https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/html.tpl \
+          -O templates/html.tpl
+
+        ls -l templates/html.tpl
+      displayName: "Download Trivy HTML Template"
+
+    - script: |
+        set -e
+
+        echo "Downloading Trivy vulnerability database..."
+
+        /opt/tools/trivy image \
+          --cache-dir /data/devops/trivy-cache \
+          --download-db-only
+      displayName: "Download Trivy Database"
+
+    - script: |
+        set -e
+
+        echo "Pulling ELK images..."
+
+        docker pull docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+        docker pull docker.elastic.co/logstash/logstash:8.13.0
+        docker pull docker.elastic.co/kibana/kibana:8.13.0
+        docker pull docker.elastic.co/beats/filebeat:8.13.0
+      displayName: "Pull ELK Images"
+
+    - script: |
+        set -e
+
+        echo "Scanning Elasticsearch..."
+        /opt/tools/trivy image \
+          --cache-dir /data/devops/trivy-cache \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --format template \
+          --template "@templates/html.tpl" \
+          -o reports/elasticsearch.html \
+          docker.elastic.co/elasticsearch/elasticsearch:8.13.0
+
+        echo "Scanning Logstash..."
+        /opt/tools/trivy image \
+          --cache-dir /data/devops/trivy-cache \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --format template \
+          --template "@templates/html.tpl" \
+          -o reports/logstash.html \
+          docker.elastic.co/logstash/logstash:8.13.0
+
+        echo "Scanning Kibana..."
+        /opt/tools/trivy image \
+          --cache-dir /data/devops/trivy-cache \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --format template \
+          --template "@templates/html.tpl" \
+          -o reports/kibana.html \
+          docker.elastic.co/kibana/kibana:8.13.0
+
+        echo "Scanning Filebeat..."
+        /opt/tools/trivy image \
+          --cache-dir /data/devops/trivy-cache \
+          --severity HIGH,CRITICAL \
+          --ignore-unfixed \
+          --format template \
+          --template "@templates/html.tpl" \
+          -o reports/filebeat.html \
+          docker.elastic.co/beats/filebeat:8.13.0
+
+        echo ""
+        echo "======================================"
+        echo "Trivy Scan Completed Successfully"
+        echo "Generated Reports:"
+        ls -lh reports/
+        echo "======================================"
+      displayName: "Generate Trivy HTML Reports"
+
+    - task: PublishPipelineArtifact@1
+      displayName: "Publish Trivy Reports"
+      inputs:
+        targetPath: 'reports'
+        artifact: 'TrivyReports'
