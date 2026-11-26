@@ -286,5 +286,3 @@ message: "High-risk transaction blocked"
 | Logstash TCP    | 5000  | Direct Python TCP shipping   |
 | Logstash HTTP   | 8080  | HTTP log endpoint            |
 | Logstash API    | 9600  | Logstash metrics             |
-#   e l k - c i - c d  
- 
